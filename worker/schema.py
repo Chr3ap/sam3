@@ -26,6 +26,8 @@ def validate_input(job_input: dict):
         "output": {"type": dict, "required": False, "default": {}},
 
         "postprocess": {"type": dict, "required": False, "default": {}},
+
+        "combine_masks": {"type": bool, "required": False, "default": False},
     }
 
     res = validate(job_input, schema)
