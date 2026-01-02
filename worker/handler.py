@@ -1,4 +1,5 @@
 import time
+import json
 import runpod
 import numpy as np
 
@@ -77,7 +78,7 @@ def handler(job):
         pp = _resolve_postprocess(quality, custom)
 
         out_cfg = inp.get("output") or {}
-        return_debug = bool(out_cfg.get("return_debug", True))
+        return_debug = bool(out_cfg.get("return_debug", False))  # Default to False to reduce response size
         return_instances = bool(out_cfg.get("return_instances", False))
         fmt = (out_cfg.get("format") or "png_alpha").lower()
         if fmt != "png_alpha":
@@ -155,7 +156,7 @@ def handler(job):
                 },
                 "instances": [],
             },
-            "debug": {"overlay_png_b64": b64(debug_overlay)} if debug_overlay else {},
+            "debug": {"overlay_png_b64": b64(debug_overlay)} if (return_debug and debug_overlay) else {},
             "meta": {
                 "model": "sam3",
                 "selection_mode": mode,
@@ -172,6 +173,22 @@ def handler(job):
                 },
             },
         }
+        
+        # Log response size for debugging and safety check
+        resp_str = json.dumps(resp)
+        resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
+        print(f"Response size: {resp_size_mb:.2f} MB")
+        
+        # RunPod has a response size limit (typically ~10MB)
+        # If response is too large, remove debug overlay
+        if resp_size_mb > 10:
+            print("WARNING: Response size exceeds 10MB, removing debug overlay")
+            resp["debug"] = {}
+            # Recalculate size
+            resp_str = json.dumps(resp)
+            resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
+            print(f"Response size after removal: {resp_size_mb:.2f} MB")
+        
         return resp
 
     except UserError as e:
