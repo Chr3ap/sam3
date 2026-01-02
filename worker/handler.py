@@ -100,9 +100,21 @@ def handler(job):
         if not masks:
             raise UserError("NO_MASK", f"No masks returned for prompt '{prompt_text}'", {"prompt": prompt_text})
 
-        # Choose best mask by score (or union top-k in future)
-        best_i = int(np.argmax(np.array(scores)))
-        raw = masks[best_i]
+        # Check if we should combine multiple masks
+        combine_masks = inp.get("combine_masks", False)
+
+        if combine_masks and len(masks) > 1:
+            # Combine all masks with union (OR operation) - keeps all floor regions
+            raw = np.zeros_like(masks[0])
+            for mask in masks:
+                raw = np.maximum(raw, mask)  # Union: keep any pixel that's in any mask
+            print(f"Combined {len(masks)} masks into single mask")
+            best_i = 0  # For metadata, use first mask index
+        else:
+            # Choose best mask by score (original behavior)
+            best_i = int(np.argmax(np.array(scores)))
+            raw = masks[best_i]
+            print(f"Using best mask (score: {scores[best_i]:.3f})")
 
         # --- Postprocess: hard + soft
         t_pp0 = time.time()
@@ -147,7 +159,9 @@ def handler(job):
             "meta": {
                 "model": "sam3",
                 "selection_mode": mode,
-                "scores": [float(scores[best_i])],
+                "scores": [float(s) for s in scores],
+                "num_masks": len(masks),
+                "combine_masks": combine_masks,
                 "postprocess_quality": quality,
                 "timings_ms": {
                     "download_decode": int((t_img1 - t_img0) * 1000),
