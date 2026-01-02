@@ -158,6 +158,7 @@ def handler(job):
             print(f"Combined {len(masks)} masks from {len(targets)} targets")
             best_i = 0  # For metadata
             combine_masks = True  # Always true for multi-target
+            t_sam1 = time.time()  # Set timing for multi-target path
             
         else:
             # Single target mode (existing logic)
