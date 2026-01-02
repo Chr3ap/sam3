@@ -60,21 +60,27 @@ def handler(job):
     try:
         job_input = job.get("input", {})
         print(f"Job input keys: {list(job_input.keys())}")
+        print(f"Validating input...")
         validated = validate_input(job_input)
         if "errors" in validated:
+            print(f"Validation errors: {validated['errors']}")
             return error_response("INVALID_INPUT", "Validation failed", {"errors": validated["errors"]})
         inp = validated["validated_input"]  # per RunPod validator docs
+        print(f"Input validated successfully")
 
         request_id = inp.get("request_id")
         image_spec = inp.get("image")
         target = (inp.get("target") or "").strip()
+        print(f"Target: {target}")
 
         mode, text = _get_selection(inp)
+        print(f"Selection mode: {mode}, text: {text}")
         if mode != "text":
             raise UserError("INVALID_INPUT", "Only selection.mode='text' is supported in v1")
         prompt_text = (text or target).strip()
         if not prompt_text:
             raise UserError("INVALID_INPUT", "selection.text or target must be non-empty")
+        print(f"Prompt text: {prompt_text}")
 
         quality, custom = _get_quality(inp)
         pp = _resolve_postprocess(quality, custom)
@@ -90,15 +96,19 @@ def handler(job):
             return_instances = False
 
         # --- Load image
+        print("Loading image...")
         t_img0 = time.time()
         rgb = load_image_rgb(image_spec)
         h, w = rgb.shape[:2]
+        print(f"Image loaded: {w}x{h}")
         t_img1 = time.time()
 
         # --- SAM3 inference (mask candidates)
+        print("Running SAM3 inference...")
         t_sam0 = time.time()
         masks, scores = SAM3.segment_text(rgb, prompt_text)  # TODO in adapter
         t_sam1 = time.time()
+        print(f"SAM3 inference complete: {len(masks)} masks found")
 
         if not masks:
             raise UserError("NO_MASK", f"No masks returned for prompt '{prompt_text}'", {"prompt": prompt_text})
@@ -221,20 +231,33 @@ def handler(job):
                 raise RuntimeError(f"Response size ({resp_size_mb:.2f}MB) exceeds RunPod limit. Image may be too large.")
         
         print(f"Returning response ({resp_size_mb:.2f}MB)...")
+        # Try to serialize response to catch any JSON errors before returning
+        try:
+            test_serialize = json.dumps(resp)
+            print("Response serialization test passed")
+        except Exception as ser_error:
+            print(f"ERROR: Response cannot be serialized: {ser_error}")
+            # Return a minimal error response
+            return error_response("SERIALIZATION_ERROR", f"Cannot serialize response: {str(ser_error)}", {})
+        
         return resp
 
     except UserError as e:
         print(f"UserError: {e.code} - {e.message}")
         if e.details:
             print(f"Error details: {e.details}")
-        return error_response(e.code, e.message, e.details)
+        err_resp = error_response(e.code, e.message, e.details)
+        print(f"Returning error response: {err_resp}")
+        return err_resp
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
         print(f"INTERNAL_ERROR: {str(e)}")
         print(f"Traceback:\n{error_trace}")
         # Return error with traceback in details for debugging
-        return error_response("INTERNAL_ERROR", str(e), {"traceback": error_trace})
+        err_resp = error_response("INTERNAL_ERROR", str(e), {"traceback": error_trace})
+        print(f"Returning error response: {err_resp}")
+        return err_resp
 
 runpod.serverless.start({"handler": handler})  # required
 
