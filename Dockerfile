@@ -7,17 +7,17 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy requirements and install Python deps
+# Install worker requirements first (includes transformers, etc.)
 COPY worker/requirements.txt /app/requirements.txt
 RUN python3 -m pip install --upgrade pip && \
     pip install -r requirements.txt && \
     pip cache purge
 
-# Install SAM3 from current repo
-RUN pip install -e . && \
+# Install SAM3 from your GitHub fork (instead of editable install)
+RUN pip install git+https://github.com/Chr3ap/sam3.git && \
     pip cache purge
 
-# Install Hugging Face hub
+# Install Hugging Face hub (if not already in requirements)
 RUN pip install huggingface_hub && \
     pip cache purge
 
@@ -25,8 +25,8 @@ RUN pip install huggingface_hub && \
 RUN mkdir -p /app/checkpoints
 ENV SAM3_CHECKPOINT=/app/checkpoints/sam3.pt
 
-# Copy everything (including worker code)
-COPY . /app
+# Copy worker code last (changes frequently)
+COPY worker /app
 
 # Run the worker
-CMD ["python3", "worker/handler.py"]
+CMD ["python3", "handler.py"]
