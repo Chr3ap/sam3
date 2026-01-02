@@ -71,16 +71,35 @@ def handler(job):
         request_id = inp.get("request_id")
         image_spec = inp.get("image")
         target = (inp.get("target") or "").strip()
-        print(f"Target: {target}")
-
+        targets = inp.get("targets")  # List of targets for multi-target mode
+        
+        # Determine if we're in multi-target mode
+        use_multi_target = targets and isinstance(targets, list) and len(targets) > 0
+        
+        if use_multi_target:
+            print(f"Multi-target mode: {targets}")
+            # Validate targets
+            valid_targets = [str(t).strip() for t in targets if str(t).strip()]
+            if not valid_targets:
+                raise UserError("INVALID_INPUT", "targets list must contain at least one non-empty string")
+            targets = valid_targets
+        else:
+            # Single target mode (backward compatible)
+            if not target:
+                raise UserError("INVALID_INPUT", "Either 'target' or 'targets' must be provided")
+            print(f"Single target mode: {target}")
+        
         mode, text = _get_selection(inp)
         print(f"Selection mode: {mode}, text: {text}")
         if mode != "text":
             raise UserError("INVALID_INPUT", "Only selection.mode='text' is supported in v1")
-        prompt_text = (text or target).strip()
-        if not prompt_text:
-            raise UserError("INVALID_INPUT", "selection.text or target must be non-empty")
-        print(f"Prompt text: {prompt_text}")
+        
+        # For single target mode, use selection.text or target
+        if not use_multi_target:
+            prompt_text = (text or target).strip()
+            if not prompt_text:
+                raise UserError("INVALID_INPUT", "selection.text or target must be non-empty")
+            print(f"Prompt text: {prompt_text}")
 
         quality, custom = _get_quality(inp)
         pp = _resolve_postprocess(quality, custom)
@@ -104,30 +123,69 @@ def handler(job):
         t_img1 = time.time()
 
         # --- SAM3 inference (mask candidates)
-        print("Running SAM3 inference...")
         t_sam0 = time.time()
-        masks, scores = SAM3.segment_text(rgb, prompt_text)  # TODO in adapter
-        t_sam1 = time.time()
-        print(f"SAM3 inference complete: {len(masks)} masks found")
-
-        if not masks:
-            raise UserError("NO_MASK", f"No masks returned for prompt '{prompt_text}'", {"prompt": prompt_text})
-
-        # Check if we should combine multiple masks
-        combine_masks = inp.get("combine_masks", False)
-
-        if combine_masks and len(masks) > 1:
-            # Combine all masks with union (OR operation) - keeps all floor regions
+        
+        if use_multi_target:
+            # Multi-target mode: process each target and combine all masks
+            print(f"Running SAM3 inference for {len(targets)} targets...")
+            all_masks = []
+            all_scores = []
+            target_results = {}  # Track which masks came from which target
+            
+            for tgt in targets:
+                print(f"  Processing target: '{tgt}'")
+                masks, scores = SAM3.segment_text(rgb, tgt)
+                if masks:
+                    all_masks.extend(masks)
+                    all_scores.extend(scores)
+                    target_results[tgt] = len(masks)
+                    print(f"    Found {len(masks)} masks for '{tgt}'")
+                else:
+                    print(f"    No masks found for '{tgt}'")
+                    target_results[tgt] = 0
+            
+            if not all_masks:
+                raise UserError("NO_MASK", f"No masks returned for any target in {targets}", {"targets": targets, "results": target_results})
+            
+            masks = all_masks
+            scores = all_scores
+            print(f"SAM3 inference complete: {len(masks)} total masks from {len(targets)} targets")
+            
+            # Always combine masks from multiple targets
             raw = np.zeros_like(masks[0])
             for mask in masks:
                 raw = np.maximum(raw, mask)  # Union: keep any pixel that's in any mask
-            print(f"Combined {len(masks)} masks into single mask")
-            best_i = 0  # For metadata, use first mask index
+            print(f"Combined {len(masks)} masks from {len(targets)} targets")
+            best_i = 0  # For metadata
+            combine_masks = True  # Always true for multi-target
+            
         else:
-            # Choose best mask by score (original behavior)
-            best_i = int(np.argmax(np.array(scores)))
-            raw = masks[best_i]
-            print(f"Using best mask (score: {scores[best_i]:.3f})")
+            # Single target mode (existing logic)
+            print("Running SAM3 inference...")
+            masks, scores = SAM3.segment_text(rgb, prompt_text)
+            t_sam1 = time.time()
+            print(f"SAM3 inference complete: {len(masks)} masks found")
+
+            if not masks:
+                raise UserError("NO_MASK", f"No masks returned for prompt '{prompt_text}'", {"prompt": prompt_text})
+
+            # Check if we should combine multiple masks
+            combine_masks = inp.get("combine_masks", False)
+
+            if combine_masks and len(masks) > 1:
+                # Combine all masks with union (OR operation) - keeps all floor regions
+                raw = np.zeros_like(masks[0])
+                for mask in masks:
+                    raw = np.maximum(raw, mask)  # Union: keep any pixel that's in any mask
+                print(f"Combined {len(masks)} masks into single mask")
+                best_i = 0  # For metadata, use first mask index
+            else:
+                # Choose best mask by score (original behavior)
+                best_i = int(np.argmax(np.array(scores)))
+                raw = masks[best_i]
+                print(f"Using best mask (score: {scores[best_i]:.3f})")
+        
+        t_sam1 = time.time()
 
         # --- Postprocess: hard + soft
         t_pp0 = time.time()
@@ -187,6 +245,8 @@ def handler(job):
                 "scores": [float(s) for s in scores],
                 "num_masks": len(masks),
                 "combine_masks": combine_masks,
+                "targets_used": targets if use_multi_target else [target] if target else None,
+                "multi_target_mode": use_multi_target,
                 "postprocess_quality": quality,
                 "timings_ms": {
                     "download_decode": int((t_img1 - t_img0) * 1000),

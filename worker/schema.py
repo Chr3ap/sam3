@@ -17,8 +17,13 @@ def validate_input(job_input: dict):
 
         "target": {
             "type": str,
-            "required": True,
+            "required": False,  # Optional if targets is provided
             "constraints": lambda s: _non_empty_str(s) and len(s) <= 64,
+        },
+        "targets": {
+            "type": list,
+            "required": False,
+            "default": None,
         },
 
         "selection": {"type": dict, "required": False, "default": {}},
