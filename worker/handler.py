@@ -130,8 +130,13 @@ def handler(job):
 
         # --- Encode outputs
         t_enc0 = time.time()
+        print(f"Encoding masks: image size {w}x{h}, mask shape {hard01.shape}")
         hard_png = png_alpha_from_mask(hard01)
         soft_png = png_alpha_from_mask(soft01)
+        hard_size_mb = len(hard_png) / (1024 * 1024)
+        soft_size_mb = len(soft_png) / (1024 * 1024)
+        print(f"Encoded masks: hard={hard_size_mb:.2f}MB, soft={soft_size_mb:.2f}MB")
+        
         debug_overlay = None
         if return_debug:
             ov = overlay_mask(rgb, hard01)
@@ -142,6 +147,8 @@ def handler(job):
             buf = io.BytesIO()
             Image.fromarray(ov, mode="RGB").save(buf, format="PNG")
             debug_overlay = buf.getvalue()
+            debug_size_mb = len(debug_overlay) / (1024 * 1024)
+            print(f"Debug overlay size: {debug_size_mb:.2f}MB")
         t_enc1 = time.time()
 
         resp = {
@@ -175,20 +182,38 @@ def handler(job):
         }
         
         # Log response size for debugging and safety check
-        resp_str = json.dumps(resp)
-        resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
-        print(f"Response size: {resp_size_mb:.2f} MB")
-        
-        # RunPod has a response size limit (typically ~10MB)
-        # If response is too large, remove debug overlay
-        if resp_size_mb > 10:
-            print("WARNING: Response size exceeds 10MB, removing debug overlay")
-            resp["debug"] = {}
-            # Recalculate size
+        print("Building response JSON...")
+        try:
             resp_str = json.dumps(resp)
             resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
-            print(f"Response size after removal: {resp_size_mb:.2f} MB")
+            print(f"Response size: {resp_size_mb:.2f} MB")
+        except Exception as e:
+            print(f"ERROR serializing response: {e}")
+            # Try without debug
+            resp["debug"] = {}
+            resp_str = json.dumps(resp)
+            resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
+            print(f"Response size (without debug): {resp_size_mb:.2f} MB")
         
+        # RunPod has a response size limit (typically ~6-10MB)
+        # If response is too large, remove debug overlay and try to reduce
+        if resp_size_mb > 6:
+            print(f"WARNING: Response size ({resp_size_mb:.2f}MB) exceeds 6MB limit")
+            # Remove debug overlay
+            if resp.get("debug"):
+                print("Removing debug overlay...")
+                resp["debug"] = {}
+                resp_str = json.dumps(resp)
+                resp_size_mb = len(resp_str.encode('utf-8')) / (1024 * 1024)
+                print(f"Response size after removing debug: {resp_size_mb:.2f} MB")
+            
+            # If still too large, we might need to reduce mask quality or size
+            if resp_size_mb > 10:
+                print(f"ERROR: Response still too large ({resp_size_mb:.2f}MB) after removing debug")
+                # This is a critical error - masks are too large
+                raise RuntimeError(f"Response size ({resp_size_mb:.2f}MB) exceeds RunPod limit. Image may be too large.")
+        
+        print(f"Returning response ({resp_size_mb:.2f}MB)...")
         return resp
 
     except UserError as e:
