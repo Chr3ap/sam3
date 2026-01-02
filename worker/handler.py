@@ -55,9 +55,11 @@ def _resolve_postprocess(quality: str, custom: dict | None):
 
 def handler(job):
     t0 = time.time()
+    print(f"Handler called with job: {job.get('id', 'unknown')}")
 
     try:
         job_input = job.get("input", {})
+        print(f"Job input keys: {list(job_input.keys())}")
         validated = validate_input(job_input)
         if "errors" in validated:
             return error_response("INVALID_INPUT", "Validation failed", {"errors": validated["errors"]})
@@ -136,6 +138,11 @@ def handler(job):
         hard_size_mb = len(hard_png) / (1024 * 1024)
         soft_size_mb = len(soft_png) / (1024 * 1024)
         print(f"Encoded masks: hard={hard_size_mb:.2f}MB, soft={soft_size_mb:.2f}MB")
+        
+        # If masks are too large, we might need to resize or compress
+        total_mask_size = hard_size_mb + soft_size_mb
+        if total_mask_size > 5:  # If masks alone are > 5MB, response will be too large
+            print(f"WARNING: Mask size ({total_mask_size:.2f}MB) is very large - response may exceed RunPod limit")
         
         debug_overlay = None
         if return_debug:
@@ -217,10 +224,17 @@ def handler(job):
         return resp
 
     except UserError as e:
+        print(f"UserError: {e.code} - {e.message}")
+        if e.details:
+            print(f"Error details: {e.details}")
         return error_response(e.code, e.message, e.details)
     except Exception as e:
-        # Let RunPod mark failures automatically if you prefer raising; here we return a stable error shape.
-        return error_response("INTERNAL_ERROR", str(e), {})
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"INTERNAL_ERROR: {str(e)}")
+        print(f"Traceback:\n{error_trace}")
+        # Return error with traceback in details for debugging
+        return error_response("INTERNAL_ERROR", str(e), {"traceback": error_trace})
 
 runpod.serverless.start({"handler": handler})  # required
 
