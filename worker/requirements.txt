@@ -9,6 +9,7 @@ transformers
 einops
 decord
 pycocotools
+psutil
 # Common SAM3 dependencies (install upfront to avoid rebuilds)
 scipy
 matplotlib
