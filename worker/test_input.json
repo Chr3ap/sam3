@@ -1,0 +1,11 @@
+{
+  "input": {
+    "request_id": "local-test-1",
+    "image": { "type": "url", "value": "https://your-test-image-url" },
+    "target": "floor",
+    "selection": { "mode": "text", "text": "floor" },
+    "output": { "format": "png_alpha", "return_instances": false, "return_debug": true },
+    "postprocess": { "quality": "balanced", "custom": null }
+  }
+}
+

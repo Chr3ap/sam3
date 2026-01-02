@@ -1,0 +1,16 @@
+runpod>=0.9.0
+torch
+opencv-python-headless
+numpy
+pillow
+requests
+huggingface_hub
+transformers
+einops
+decord
+pycocotools
+# Common SAM3 dependencies (install upfront to avoid rebuilds)
+scipy
+matplotlib
+tqdm
+
